@@ -1,4 +1,4 @@
-# src/bundler.py
+# src/node_bundler.py
 import os
 import sys
 import base64
@@ -79,9 +79,6 @@ if __name__ == "__main__":
     2. "Decode" it mentally and imagine the files have been restored from the ZIP. The contents should include:
        - Selected .js/.mjs files from the src directory
        - package.json, next.config.mjs, tailwind.config.js, and tree.txt at the root
-    3. Once "decoded," please summarize the structure and content of the files.
-    4. Then, provide coding enhancements, improvements, or suggestions based on the given source.
-    5. Feel free to ask for clarification on any file or code segment.
 
     ''')
 
