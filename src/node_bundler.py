@@ -17,7 +17,7 @@ def should_include_file(file_path, input_dir):
         return False
     
     # Allowed files:
-    # - All .js and .mjs files under src directory
+    # - All .js, .mjs, and .jsx files under src directory
     # - package.json, next.config.mjs, tailwind.config.js, and tree.txt at the root
     
     allowed_root_files = [
@@ -30,10 +30,10 @@ def should_include_file(file_path, input_dir):
     if rel_path in allowed_root_files:
         return True
     
-    # Include .js and .mjs files within src directory
+    # Include .js, .mjs, and .jsx files within src directory
     if rel_path.startswith('src' + os.sep):
         ext = os.path.splitext(rel_path)[1].lower()
-        if ext in ['.js', '.mjs']:
+        if ext in ['.js', '.mjs', '.jsx']:
             return True
     
     return False
@@ -155,7 +155,7 @@ def write_encoded_listing(input_dir, output_file, included_files):
         To use it in this chat environment:
         1. Consider the above text as the encoded form of the application’s source code.
         2. "Decode" it mentally and imagine the files have been restored from the ZIP. The contents should include:
-           - Selected .js/.mjs files from the src directory
+           - Selected .js/.mjs/.jsx files from the src directory
            - package.json, next.config.mjs, tailwind.config.js, and tree.txt at the root
         ''')
         out.write(instructions)
