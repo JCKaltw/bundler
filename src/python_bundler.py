@@ -63,7 +63,6 @@ def extract_local_imports(py_file, project_root):
                     local_deps.add(dep_file)
             else:
                 # Relative import from the current directory
-                # For "from . import something", try something.py in current directory
                 for alias in node.names:
                     dep_file = guess_local_module_path(alias.name, current_dir, is_relative=True)
                     if dep_file and dep_file.startswith(os.path.abspath(project_root)):
@@ -74,7 +73,7 @@ def extract_local_imports(py_file, project_root):
 def guess_local_module_path(module_name, base_path, is_relative=False):
     """
     Given a module name like 'utils' or 'mypkg.helpers' and a base path,
-    guess the corresponding .py file. 
+    guess the corresponding .py file.
     - For absolute references, the base_path is project_root.
     - For relative references, the base_path is the directory of the current file.
 
@@ -89,7 +88,6 @@ def guess_local_module_path(module_name, base_path, is_relative=False):
     
     if os.path.isfile(candidate):
         return os.path.abspath(candidate)
-
     return None
 
 def find_init_files_for_packages(included_files, project_root):
@@ -155,12 +153,24 @@ def build_directory_tree(file_paths, project_root):
     return "\n".join(lines)
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
-        print("Usage: python3 python_bundler.py <root_python_script> <output_text_file>")
+
+    # Basic usage check
+    if len(sys.argv) < 3:
+        print("Usage: python3 python_bundler.py [--no-encode] <root_python_script> <output_text_file>")
         sys.exit(1)
 
-    root_script = sys.argv[1]
-    output_text_file = sys.argv[2]
+    # Parse args for optional --no-encode
+    args = sys.argv[1:]
+    no_encode = False
+    if "--no-encode" in args:
+        no_encode = True
+        args.remove("--no-encode")
+
+    if len(args) != 2:
+        print("Usage: python3 python_bundler.py [--no-encode] <root_python_script> <output_text_file>")
+        sys.exit(1)
+
+    root_script, output_text_file = args
 
     if not os.path.isfile(root_script):
         print(f"Error: {root_script} is not a valid file.")
@@ -170,42 +180,64 @@ if __name__ == "__main__":
 
     # Gather all dependencies - local files only
     included_files = find_local_dependencies(root_script, project_root)
-
-    # Zip and base64 encode them
-    with tempfile.TemporaryDirectory() as tmpdir:
-        zip_path = os.path.join(tmpdir, "filtered_app.zip")
-        zip_files(included_files, zip_path, project_root)
-
-        with open(zip_path, "rb") as f:
-            zip_data = f.read()
-            encoded = base64.b64encode(zip_data).decode('utf-8')
-
-    # Build directory tree of included files
     directory_tree = build_directory_tree(included_files, project_root)
 
-    instructions = dedent('''
-    ---------------------------
-    Instructions for the Assistant
-    ---------------------------
-    The text above is a base64-encoded ZIP containing a Python project’s filtered source code.
-    Only locally coded files are included. External libraries or unresolvable imports were excluded.
-    To use it in this chat environment:
-    1. Consider the above text as the encoded form of the application’s source code.
-    2. "Decode" it mentally and imagine the files have been restored from the ZIP.
-    3. Below is the directory tree of the included files for reference:
-    
-    ''') + directory_tree + dedent('''
+    if no_encode:
+        # ----------------------------------------------------
+        # --no-encode mode: plain text listings, no instructions
+        # ----------------------------------------------------
+        with open(output_text_file, "w", encoding="utf-8") as out:
+            # Write the directory tree at the top
+            out.write(directory_tree)
+            out.write("\n\n")
 
-    4. Once "decoded," please summarize the structure and content of these files.
-    5. Then, provide coding enhancements, improvements, or suggestions based on the given source.
-    6. Feel free to ask for clarification on any file or code segment.
-    ''')
+            # For each included file, write a header and its contents
+            for fpath in sorted(included_files):
+                rel_path = os.path.relpath(fpath, start=project_root)
+                out.write(f"--- BEGIN FILE: {rel_path} ---\n")
+                with open(fpath, "r", encoding="utf-8") as fin:
+                    out.write(fin.read())
+                out.write(f"\n--- END FILE: {rel_path} ---\n\n")
 
-    with open(output_text_file, "w") as out:
-        out.write(encoded)
-        out.write(instructions)
+        print(f"All included files have been written as plain text to {output_text_file}.")
 
-    print(f"Filtered files have been successfully bundled and saved to {output_text_file}.")
-    print("Only the locally coded files have been included in the output.")
-    print("Copy the entire contents of that file and paste it into the chat environment.")
-    print("Follow the instructions at the bottom of the file to interpret and improve the code.")
+    else:
+        # ----------------------------------------------------
+        # Original behavior: ZIP + Base64 + instructions
+        # ----------------------------------------------------
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            zip_path = os.path.join(tmpdir, "filtered_app.zip")
+            zip_files(included_files, zip_path, project_root)
+
+            with open(zip_path, "rb") as f:
+                zip_data = f.read()
+                encoded = base64.b64encode(zip_data).decode('utf-8')
+
+        instructions = dedent('''
+        ---------------------------
+        Instructions for the Assistant
+        ---------------------------
+        The text above is a base64-encoded ZIP containing a Python project’s filtered source code.
+        Only locally coded files are included. External libraries or unresolvable imports were excluded.
+        To use it in this chat environment:
+        1. Consider the above text as the encoded form of the application’s source code.
+        2. "Decode" it mentally and imagine the files have been restored from the ZIP.
+        3. Below is the directory tree of the included files for reference:
+
+        ''') + directory_tree + dedent('''
+
+        4. Once "decoded," please summarize the structure and content of these files.
+        5. Then, provide coding enhancements, improvements, or suggestions based on the given source.
+        6. Feel free to ask for clarification on any file or code segment.
+        ''')
+
+        with open(output_text_file, "w", encoding="utf-8") as out:
+            out.write(encoded)
+            out.write(instructions)
+
+        print(f"Filtered files have been successfully bundled and saved to {output_text_file}.")
+        print("Only the locally coded files have been included in the output.")
+        print("Copy the entire contents of that file and paste it into the chat environment.")
+        print("Follow the instructions at the bottom of the file to interpret and improve the code.")
