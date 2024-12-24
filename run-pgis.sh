@@ -1,5 +1,14 @@
 #!/bin/bash
 . ~/ggmap
 . ./source-venv.sh
-rm -rf $(ggdir pgis)/app.txt
-python src/node_bundler.py $(ggdir pgis) $(ggdir pgis)/app.txt --no-encode
+
+PROJECT_ROOT=$(ggdir pgis)
+
+# pgis-app
+rm -rf $PROJECT_ROOT/pgis-app.txt
+python src/node_bundler.py $PROJECT_ROOT $PROJECT_ROOT/pgis-app.txt --no-encode
+
+# pgis-data
+rm -rf $PROJECT_ROOT/pgis-data.txt
+python src/node_bundler.py $PROJECT_ROOT/data $PROJECT_ROOT/pgis-data.txt \
+  --language none --extension-list "json" --no-encode

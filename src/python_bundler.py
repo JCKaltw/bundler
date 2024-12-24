@@ -33,22 +33,22 @@ def find_local_dependencies(entry_point, project_root):
                 to_visit.append(dep)
 
     # Include __init__.py files for packages
-    included_files = included_files.union(find_init_files_for_packages(included_files, project_root))
+    included_files = included_files.union(
+        find_init_files_for_packages(included_files, project_root)
+    )
     
     return included_files
 
 def extract_local_imports(py_file, project_root):
     """
-    Parse the Python file's AST to find local imports. We do not try to import or find specs.
-    We only include the file if it exists within the project_root.
+    Parse the Python file's AST to find local imports. 
+    We only include files that exist within project_root.
     """
     local_deps = set()
     with open(py_file, "r", encoding="utf-8") as f:
         tree = ast.parse(f.read(), filename=py_file)
 
-    # We'll need the directory of the current file for relative imports
     current_dir = os.path.dirname(py_file)
-
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
@@ -56,7 +56,7 @@ def extract_local_imports(py_file, project_root):
                 if dep_file:
                     local_deps.add(dep_file)
         elif isinstance(node, ast.ImportFrom):
-            # node.module might be None for something like "from . import foo"
+            # node.module might be None for "from . import foo"
             if node.module is not None:
                 dep_file = guess_local_module_path(node.module, project_root)
                 if dep_file:
@@ -67,19 +67,13 @@ def extract_local_imports(py_file, project_root):
                     dep_file = guess_local_module_path(alias.name, current_dir, is_relative=True)
                     if dep_file and dep_file.startswith(os.path.abspath(project_root)):
                         local_deps.add(dep_file)
-
     return local_deps
 
 def guess_local_module_path(module_name, base_path, is_relative=False):
     """
-    Given a module name like 'utils' or 'mypkg.helpers' and a base path,
-    guess the corresponding .py file.
-    - For absolute references, the base_path is project_root.
-    - For relative references, the base_path is the directory of the current file.
-
-    We do not try to resolve using importlib; we only check the filesystem.
+    Convert a module name like 'utils' or 'mypkg.helpers' to a .py path,
+    checking if that file actually exists on disk.
     """
-    # Convert module_name to a file path: 'mypkg.utils' -> 'mypkg/utils.py'
     rel_path = module_name.replace('.', os.sep) + '.py'
     if is_relative:
         candidate = os.path.join(base_path, rel_path)
@@ -92,8 +86,8 @@ def guess_local_module_path(module_name, base_path, is_relative=False):
 
 def find_init_files_for_packages(included_files, project_root):
     """
-    Ensure that any directories that form packages (i.e., contain __init__.py)
-    are also included if they are ancestors of included modules.
+    If a directory is a Python package, ensure its __init__.py is included.
+    We do this for any ancestor dirs of included .py files.
     """
     init_files = set()
     for f in included_files:
@@ -110,6 +104,18 @@ def find_init_files_for_packages(included_files, project_root):
             current_dir = parent
 
     return init_files
+
+def find_all_py_files(base_dir):
+    """
+    Recursively find ALL Python files (ending in *.py) in the specified base_dir.
+    """
+    included_files = set()
+    for root, dirs, files in os.walk(base_dir):
+        for filename in files:
+            if filename.endswith(".py"):
+                full_path = os.path.join(root, filename)
+                included_files.add(os.path.abspath(full_path))
+    return included_files
 
 def zip_files(file_paths, zip_path, base_dir):
     with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
@@ -139,12 +145,10 @@ def build_directory_tree(file_paths, project_root):
         for i, entry in enumerate(entries):
             connector = "└── " if i == len(entries) - 1 else "├── "
             if isinstance(d[entry], dict):
-                # Directory
                 lines.append(prefix + connector + entry)
                 extension = "    " if i == len(entries) - 1 else "│   "
                 lines.extend(format_tree(d[entry], prefix + extension))
             else:
-                # File
                 lines.append(prefix + connector + entry)
         return lines
 
@@ -153,33 +157,46 @@ def build_directory_tree(file_paths, project_root):
     return "\n".join(lines)
 
 if __name__ == "__main__":
+    # Usage: 
+    #   python3 python_bundler.py [--no-encode] <source_path> <output_text_file>
+    #
+    # where <source_path> can be either:
+    #   - a Python file: we parse imports to find local deps
+    #   - a directory: we collect *all* .py files in that directory
 
-    # Basic usage check
     if len(sys.argv) < 3:
-        print("Usage: python3 python_bundler.py [--no-encode] <root_python_script> <output_text_file>")
+        print("Usage: python3 python_bundler.py [--no-encode] <source_path> <output_text_file>")
         sys.exit(1)
 
-    # Parse args for optional --no-encode
     args = sys.argv[1:]
     no_encode = False
+
+    # Check for --no-encode
     if "--no-encode" in args:
         no_encode = True
         args.remove("--no-encode")
 
     if len(args) != 2:
-        print("Usage: python3 python_bundler.py [--no-encode] <root_python_script> <output_text_file>")
+        print("Usage: python3 python_bundler.py [--no-encode] <source_path> <output_text_file>")
         sys.exit(1)
 
-    root_script, output_text_file = args
+    source_path, output_text_file = args
 
-    if not os.path.isfile(root_script):
-        print(f"Error: {root_script} is not a valid file.")
+    # source_path can be either a directory or a file
+    if not (os.path.isdir(source_path) or os.path.isfile(source_path)):
+        print(f"Error: {source_path} is neither a valid file nor a directory.")
         sys.exit(1)
 
-    project_root = os.path.dirname(root_script)
+    # Collect files
+    if os.path.isdir(source_path):
+        # If it's a directory, gather all .py files
+        project_root = os.path.abspath(source_path)
+        included_files = find_all_py_files(project_root)
+    else:
+        # If it's a file, gather dependencies from that file
+        project_root = os.path.dirname(os.path.abspath(source_path))
+        included_files = find_local_dependencies(source_path, project_root)
 
-    # Gather all dependencies - local files only
-    included_files = find_local_dependencies(root_script, project_root)
     directory_tree = build_directory_tree(included_files, project_root)
 
     if no_encode:
@@ -205,8 +222,6 @@ if __name__ == "__main__":
         # ----------------------------------------------------
         # Original behavior: ZIP + Base64 + instructions
         # ----------------------------------------------------
-        import tempfile
-
         with tempfile.TemporaryDirectory() as tmpdir:
             zip_path = os.path.join(tmpdir, "filtered_app.zip")
             zip_files(included_files, zip_path, project_root)
