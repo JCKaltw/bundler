@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# src/python_bundler.py
 import os
 import sys
 import base64
@@ -125,7 +126,8 @@ def zip_files(file_paths, zip_path, base_dir):
 
 def build_directory_tree(file_paths, project_root):
     """
-    Build a directory tree representation as text.
+    Build a directory tree representation as text, explicitly showing
+    the name of the root directory (e.g. ./schemas instead of just '.').
     """
     rel_paths = [os.path.relpath(p, start=project_root) for p in file_paths]
     rel_paths = sorted(rel_paths)
@@ -152,7 +154,16 @@ def build_directory_tree(file_paths, project_root):
                 lines.append(prefix + connector + entry)
         return lines
 
-    lines = ["."]
+    # Use the basename of the project_root to label the directory tree
+    root_label = os.path.basename(os.path.normpath(project_root))
+    # If the basename is empty (unlikely but can happen if project_root is '/'), default to '.'
+    if not root_label:
+        root_label = '.'
+    else:
+        # Prepend "./" to match the style of your example
+        root_label = f"./{root_label}"
+
+    lines = [root_label]
     lines.extend(format_tree(tree))
     return "\n".join(lines)
 
