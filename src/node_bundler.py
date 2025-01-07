@@ -101,6 +101,7 @@ def build_directory_tree_structure(files_list):
         current = tree
         for p in parts[:-1]:
             current = current.setdefault(p, {})
+        # Final part is the file name
         current[parts[-1]] = None
     return tree
 
@@ -118,11 +119,20 @@ def format_directory_tree(tree, prefix=""):
             lines.extend(format_directory_tree(subtree, new_prefix))
     return lines
 
-def write_directory_tree(out, included_files):
+def write_directory_tree(out, included_files, root_dir):
+    """
+    Writes a tree structure to 'out', including the actual root directory name
+    (instead of just '.').
+    """
     tree_structure = build_directory_tree_structure(included_files)
     out.write("Project Directory Structure:\n\n")
     out.write("```\n")
-    out.write(".\n")
+    # Use the base name of the provided directory instead of '.'
+    root_name = os.path.basename(os.path.normpath(root_dir))
+    # If the directory path ends with a slash or we couldn't extract a basename, fall back to '.'
+    if not root_name:
+        root_name = '.'
+    out.write(root_name + "\n")
     lines = format_directory_tree(tree_structure)
     for line in lines:
         out.write(line + "\n")
@@ -136,7 +146,8 @@ def zip_filtered_directory(input_dir, zip_path, included_files):
 
 def write_direct_listings(input_dir, output_file, included_files):
     with open(output_file, "w") as out:
-        write_directory_tree(out, included_files)
+        # Pass 'input_dir' to show the real root name
+        write_directory_tree(out, included_files, input_dir)
 
         for fpath in included_files:
             out.write(f"## File: {fpath}\n")
@@ -168,7 +179,8 @@ def write_encoded_listing(input_dir, output_file, included_files):
             encoded = base64.b64encode(zip_data).decode('utf-8')
 
     with open(output_file, "w") as out:
-        write_directory_tree(out, included_files)
+        # Pass 'input_dir' to show the real root name
+        write_directory_tree(out, included_files, input_dir)
         out.write(encoded)
 
         instructions = dedent('''
