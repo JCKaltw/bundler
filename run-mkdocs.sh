@@ -11,8 +11,7 @@ echo "APP_FILE: ${APP_FILE}"
 
 rm -rf ${APP_FILE}
 
-
 python src/app-bundler.py \
     /Users/chris/projects/es2/infrastructure \
     /Users/chris/projects/es2/docs \
-    ${APP_FILE} --no-encode --language mkdocs
+    ${APP_FILE} --no-encode --language mkdocs --tree-only /Users/chris/projects/es2/docs
