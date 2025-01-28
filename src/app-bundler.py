@@ -61,9 +61,14 @@ def should_include_file(file_path, input_dir, user_extensions=None, language='no
 
         # We do NOT include package.json from the root
         # Instead, we include files from anywhere if extension matches
-        # Also note the request to keep only root-level files:
-        if os.path.dirname(rel_path) != '.':
+        # Only in the root-level folder (bug fix below):
+        #
+        # PREVIOUSLY: if os.path.dirname(rel_path) != '.': return False
+        #
+        # BEGIN BUG FIX:
+        if os.path.dirname(rel_path) != '':
             return False
+        # END BUG FIX
 
         _, ext = os.path.splitext(rel_path)
         ext = ext.lower().lstrip('.')  # e.g. "json"
@@ -242,9 +247,6 @@ def write_encoded_instructions(output_file):
         out.write(instructions)
         out.write("\n")
 
-# BEGIN FIX:
-# We modify parse_options to handle the case of "--extension-list=sh,yml,yaml,json,txt"
-# (and similarly for --language=...) so it won't treat them as directories.
 def parse_options(arglist, start_index):
     """
     Parse global options (before we parse directories in multi-mode).
@@ -293,7 +295,6 @@ def parse_options(arglist, start_index):
             # Not an option, so break
             break
     return i, ne, ue, lang
-# END FIX
 
 def parse_directories_with_tree_only(arglist, start_index):
     """
@@ -305,14 +306,12 @@ def parse_directories_with_tree_only(arglist, start_index):
     i = start_index
     while i < len(arglist):
         dir_candidate = arglist[i]
-        # If we find something starting with '--', we treat it as an error because we expect
-        # a directory path unless it is exactly '--tree-only', which belongs to the previous directory.
         if dir_candidate.startswith("--"):
             print(f"Error: Expected a directory path but got option '{dir_candidate}' unexpectedly.")
             sys.exit(1)
         dirs_info.append((dir_candidate, False))  # default tree_only=False
         i += 1
-        # Check if next token is '--tree-only' for this directory
+        # Check if next token is '--tree-only'
         if i < len(arglist) and arglist[i] == "--tree-only":
             dirs_info[-1] = (dir_candidate, True)
             i += 1
