@@ -4,7 +4,7 @@
 #  project root is $(ggdir pgdb)
 ROOT_DIR=$(ggdir pgdb)
 
-export APP_FILE="${ROOT_DIR}/app-pgdb.txt"
+export APP_FILE="${ROOT_DIR}/app-mkdocs.txt"
 
 export JSON_SCHEMA_FILE="${ROOT_DIR}/app-pgdb-schemas.txt"
 export DDL_AST_FILE="${ROOT_DIR}/app-ddl-ast-json.txt"
