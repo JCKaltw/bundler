@@ -61,13 +61,9 @@ def should_include_file(file_path, input_dir, user_extensions=None, language='no
 
         # We do NOT include package.json from the root
         # Instead, we include files from anywhere if extension matches
-
-        # ---- BEGIN MODIFICATION FOR ROOT-ONLY FILES ----
-        # If you wish to only include the files in the root directory (no subdirectories),
-        # we check if the file's parent is '.' relative to the input_dir:
+        # Only in the root-level folder (per prior request):
         if os.path.dirname(rel_path) != '.':
             return False
-        # ---- END MODIFICATION ----
 
         _, ext = os.path.splitext(rel_path)
         ext = ext.lower().lstrip('.')  # e.g. "json"
@@ -154,27 +150,41 @@ def zip_filtered_directory(input_dir, zip_path, included_files):
             zipf.write(filepath, f)
 
 def write_direct_listings(input_dir, output_file, included_files):
+    """
+    Writes the directory tree and the actual contents of each included file.
+    Also includes the full disk path for clarity.
+    """
     with open(output_file, "a") as out:  # 'a' to append if multiple dirs
-        # Pass 'input_dir' to show the real root name
         write_directory_tree(out, included_files, input_dir)
 
         for fpath in included_files:
             out.write(f"## File: {fpath}\n")
+            # BEGIN NEW LINE FOR FULL ABSOLUTE PATH
+            out.write(f"# Full path under root '{os.path.abspath(input_dir)}' is: {os.path.join(os.path.abspath(input_dir), fpath)}\n\n")
+            # END NEW LINE
             full_path = os.path.join(input_dir, fpath)
             with open(full_path, "r", encoding='utf-8', errors='replace') as f:
                 out.write(f.read())
                 out.write("\n")
 
+def write_direct_listings_tree_only(input_dir, output_file, included_files):
+    """
+    Writes only the directory tree for the given root,
+    omitting file contents (tree-only mode).
+    """
+    with open(output_file, "a") as out:
+        write_directory_tree(out, included_files, input_dir)
+
 def write_direct_listings_instructions(output_file):
     """
-    Appends the instructions that were originally placed at the bottom of
-    write_direct_listings, ensuring we only add them once if multiple input dirs.
+    Appends the usage instructions for direct listings, if needed.
+    We only append them once at the end, for all processed roots.
     """
     instructions = dedent('''
     ---------------------------
     Instructions for the Assistant
     ---------------------------
-    The text above includes the full plaintext listings of each included source file.
+    The text above includes the full plaintext listings of each included source file (if not tree-only).
     Consider each "## File: filename" line as a boundary between files.
 
     To use this in the chat environment:
@@ -186,6 +196,9 @@ def write_direct_listings_instructions(output_file):
         out.write("\n")
 
 def write_encoded_listing(input_dir, output_file, included_files):
+    """
+    Writes the directory tree plus a base64-encoded ZIP of included files.
+    """
     with tempfile.TemporaryDirectory() as tmpdir:
         zip_path = os.path.join(tmpdir, "filtered_app.zip")
         zip_filtered_directory(input_dir, zip_path, included_files)
@@ -195,184 +208,225 @@ def write_encoded_listing(input_dir, output_file, included_files):
             encoded = base64.b64encode(zip_data).decode('utf-8')
 
     with open(output_file, "a") as out:  # 'a' if multiple input dirs
-        # Pass 'input_dir' to show the real root name
         write_directory_tree(out, included_files, input_dir)
         out.write(encoded)
+        out.write("\n")
+
+def write_encoded_listing_tree_only(input_dir, output_file, included_files):
+    """
+    In encoded mode, if a root is tree-only, we do NOT add file contents to the ZIP,
+    effectively giving only the directory tree. (We still show the tree for clarity.)
+    """
+    with open(output_file, "a") as out:
+        write_directory_tree(out, included_files, input_dir)
+    # We skip encoding any actual files since it's "tree-only" for this root.
 
 def write_encoded_instructions(output_file):
     """
-    Appends the instructions that were originally placed at the bottom of
-    write_encoded_listing, ensuring we only add them once if multiple dirs.
+    Appends the usage instructions for the base64-encoded approach, if needed.
+    We only append them once at the end, for all processed roots.
     """
     instructions = dedent('''
     ---------------------------
     Instructions for the Assistant
     ---------------------------
-    The text above is a base64-encoded ZIP containing the filtered project files.
+    The text above is a base64-encoded ZIP (for roots not marked as tree-only) containing the filtered project files.
+    Roots marked as tree-only only display the directory tree without file contents.
 
     To use it in this chat environment:
-    1. Consider the above text as the encoded form of the code.
+    1. Consider the above text as the encoded form of the code (only for non-tree-only directories).
     2. "Decode" it mentally and imagine the files have been restored from the ZIP.
     3. If --language=node, you'll see:
        - 'package.json' if it exists in the project root
        - All matching files (e.g. .js, .mjs, .jsx) under src/
-    4. If --language=none + --extension-list "json", you'll see .json files from anywhere, skipping package.json.
+    4. If --language=none + --extension-list="json", you'll see .json files from the root directory only, skipping package.json.
     ''')
     with open(output_file, "a") as out:
         out.write(instructions)
         out.write("\n")
 
+def parse_options(arglist, start_index):
+    """
+    Parse global options (before we parse directories in multi-mode).
+    Returns:
+        - next_index (int): position where we stop parsing
+        - no_encode (bool)
+        - user_extensions (list or None)
+        - language (str)
+    """
+    ne = False
+    ue = None
+    lang = 'node'
+    i = start_index
+    while i < len(arglist):
+        if arglist[i] == "--no-encode":
+            ne = True
+            i += 1
+        elif arglist[i] == "--extension-list":
+            if i + 1 >= len(arglist):
+                print("Error: --extension-list requires a comma-separated list argument (e.g. 'js,mjs,jsx' or 'json').")
+                sys.exit(1)
+            ue = [ext.strip().lower() for ext in arglist[i+1].split(",")]
+            i += 2
+        elif arglist[i] == "--language":
+            if i + 1 >= len(arglist):
+                print("Error: --language requires an argument (e.g. 'node' or 'none').")
+                sys.exit(1)
+            lang = arglist[i+1].strip().lower()
+            i += 2
+        elif arglist[i].startswith("--"):
+            # If this is something else, break (it might be directory-specific like --tree-only)
+            break
+        else:
+            # Not an option, so break
+            break
+    return i, ne, ue, lang
+
+def parse_directories_with_tree_only(arglist, start_index):
+    """
+    For multi-directory mode, parse each directory plus the optional --tree-only flag
+    that may appear immediately after it. This continues until we have no more arguments.
+    Returns a list of tuples: [(dir_path, tree_only_bool), ...]
+    """
+    dirs_info = []
+    i = start_index
+    while i < len(arglist):
+        dir_candidate = arglist[i]
+        if dir_candidate.startswith("--"):
+            print(f"Error: Expected a directory path but got option '{dir_candidate}' unexpectedly.")
+            sys.exit(1)
+        # We assume this is a directory path
+        dirs_info.append((dir_candidate, False))  # default tree_only=False
+        i += 1
+        # Check if next token is '--tree-only'
+        if i < len(arglist) and arglist[i] == "--tree-only":
+            # Mark the last directory as tree-only
+            dirs_info[-1] = (dir_candidate, True)
+            i += 1
+    return dirs_info
+
 if __name__ == "__main__":
-    # --- BEGIN UPDATED ARG PARSING FOR MULTIPLE DIRECTORIES ---
-    # We continue to support the original usage if exactly two arguments are given
-    # before options. If more directories are provided, we handle each in turn.
+    # --- BEGIN UPDATED ARG PARSING FOR MULTIPLE DIRECTORIES + TREE-ONLY ---
     args = sys.argv[1:]
     if len(args) < 2:
-        print("Usage: python bundler.py <input_directory> <output_text_file> [--no-encode] [--extension-list EXT_LIST] [--language LANG]")
-        print("       (Single-directory mode as originally designed.)")
-        print("Or for multiple directories:")
-        print("Usage: python bundler.py <output_text_file> [--no-encode] [--extension-list EXT_LIST] [--language LANG] <dir1> <dir2> [...]")
+        print("Usage (single directory):")
+        print("   python bundler.py <input_directory> <output_text_file> [--no-encode] [--extension-list EXT_LIST] [--language LANG] [--tree-only]")
+        print("Usage (multiple directories):")
+        print("   python bundler.py <output_text_file> [--no-encode] [--extension-list EXT_LIST] [--language LANG]")
+        print("       <dir1> [--tree-only] <dir2> [--tree-only] ...")
         sys.exit(1)
 
-    # If we detect the second argument starts with '--', or the user provides
-    # more than two positional args before we see a '--no-encode' or something,
-    # we treat the first argument as output_text_file, the rest as directories.
-    # Otherwise, we do the original single-dir logic.
-
-    # We scan to see if the second token is likely a directory or an option:
-    # - If args[1] starts with '-', we assume multiple-dir usage right away.
-    # - If we see more than 2 positional tokens before an option, we also assume multi-dir usage.
-
-    # Check a quick case:
+    # Distinguish single- vs. multi-directory usage:
     might_be_multi_mode = False
     if args[1].startswith("--"):
         might_be_multi_mode = True
     else:
-        # The user might have more directories after the second
-        # so let's see if that is the case
+        # If there's more than 2 tokens before encountering an option, assume multi-mode
         for a in args[2:]:
             if a.startswith("--"):
                 break
-            # If we get here, it means there's at least a third positional argument
-            # that doesn't start with --, so likely multi-dir usage
+            # Found a third positional argument which doesn't start with -- => multi-mode
             might_be_multi_mode = True
             break
 
-    # We'll define some placeholders:
     no_encode = False
     user_extensions = None
     language = 'node'
-    
-    def parse_options(arglist, start_index):
-        """
-        Parse the optional arguments from 'arglist' starting at 'start_index'.
-        Returns:
-         - next_index (int): the position where we stop parsing
-         - no_encode (bool)
-         - user_extensions (list or None)
-         - language (str)
-        """
-        ne = False
-        ue = None
-        lang = 'node'
-        i = start_index
-        while i < len(arglist):
-            if arglist[i] == "--no-encode":
-                ne = True
-                i += 1
-            elif arglist[i] == "--extension-list":
-                if i + 1 >= len(arglist):
-                    print("Error: --extension-list requires a comma-separated list argument (e.g. 'js,mjs,jsx' or 'json').")
-                    sys.exit(1)
-                ue = [ext.strip().lower() for ext in arglist[i+1].split(",")]
-                i += 2
-            elif arglist[i] == "--language":
-                if i + 1 >= len(arglist):
-                    print("Error: --language requires an argument (e.g. 'node' or 'none').")
-                    sys.exit(1)
-                lang = arglist[i+1].strip().lower()
-                i += 2
-            elif arglist[i].startswith("--"):
-                print(f"Error: Unknown option: {arglist[i]}")
-                sys.exit(1)
-            else:
-                # Not an option, so break
-                break
-        return i, ne, ue, lang
 
     if might_be_multi_mode:
-        # Multi-directory approach:
+        # Multi-directory approach
         output_text_file = args[0]
-        # parse the options from the rest
         idx, no_encode, user_extensions, language = parse_options(args, 1)
-        # everything else after idx are directories
-        input_dirs = args[idx:]
-        if not input_dirs:
+        # Now parse directories from idx forward, with optional --tree-only for each
+        dirs_info = parse_directories_with_tree_only(args, idx)
+        if not dirs_info:
             print("Error: no input directories specified in multi-directory mode.")
             sys.exit(1)
 
-        # We'll open the output file once. We'll process each directory in turn
-        # and append to the same output file.
-        # If encoding is on, we combine everything in one big block at the end
-        # or run each directory's logic in sequence. We'll do it in sequence to keep minimal changes.
+        # Clear or create output file
+        with open(output_text_file, "w"):
+            pass
+
+        # We'll track if we have at least one non-tree-only directory, so we know
+        # whether to append instructions about content or encoded data.
+        saw_non_tree = False
+
         if no_encode:
-            # Clear the file first
-            with open(output_text_file, "w") as _:
-                pass
-            for d in input_dirs:
+            # For each directory, if tree_only=True, just show the tree. Otherwise, show tree + contents.
+            for (d, tree_only) in dirs_info:
                 if not os.path.isdir(d):
                     print(f"Error: {d} is not a directory.")
                     sys.exit(1)
                 included_files = get_included_files(d, user_extensions, language)
-                write_direct_listings(d, output_text_file, included_files)
-            # Finally, append instructions once
-            write_direct_listings_instructions(output_text_file)
-            print(f"Included files have been listed directly in {output_text_file}.")
+                if tree_only:
+                    write_direct_listings_tree_only(d, output_text_file, included_files)
+                else:
+                    saw_non_tree = True
+                    write_direct_listings(d, output_text_file, included_files)
+            # If we had at least one non-tree-only directory, append the normal instructions
+            if saw_non_tree:
+                write_direct_listings_instructions(output_text_file)
+            print(f"Included files have been listed (or tree-only) in {output_text_file}.")
+
         else:
-            # Clear the file
-            with open(output_text_file, "w") as _:
-                pass
-            for d in input_dirs:
+            # Encoded mode
+            for (d, tree_only) in dirs_info:
                 if not os.path.isdir(d):
                     print(f"Error: {d} is not a directory.")
                     sys.exit(1)
                 included_files = get_included_files(d, user_extensions, language)
-                write_encoded_listing(d, output_text_file, included_files)
-            # Instructions once
-            write_encoded_instructions(output_text_file)
-            print(f"Filtered files have been bundled + base64-encoded in {output_text_file}.")
+                if tree_only:
+                    write_encoded_listing_tree_only(d, output_text_file, included_files)
+                else:
+                    saw_non_tree = True
+                    write_encoded_listing(d, output_text_file, included_files)
+            # Append encoded instructions if at least one directory wasn't tree-only
+            if saw_non_tree:
+                write_encoded_instructions(output_text_file)
+            print(f"Filtered files have been bundled or listed as tree-only in {output_text_file}.")
             print("Copy/paste it into the chat environment and follow instructions at the bottom of that file.")
 
     else:
-        # Original single-directory usage
-        if len(args) < 2:
-            print("Usage: python bundler.py <input_directory> <output_text_file> [--no-encode] [--extension-list EXT_LIST] [--language LANG]")
-            sys.exit(1)
-
+        # Single-directory usage
+        # Example usage: python bundler.py <dir> <out> [--no-encode] [--extension-list=...] [--language=...] [--tree-only]
         input_directory = args[0]
         output_text_file = args[1]
 
-        # shift by 2
+        # parse global options
         opt_index, no_encode, user_extensions, language = parse_options(args, 2)
-        # Now we should have no additional directories
+
+        # Now see if the next token might be --tree-only
+        tree_only = False
+        if opt_index < len(args) and args[opt_index] == "--tree-only":
+            tree_only = True
+            opt_index += 1
+
         if not os.path.isdir(input_directory):
             print(f"Error: {input_directory} is not a directory.")
             sys.exit(1)
 
         included_files = get_included_files(input_directory, user_extensions, language)
 
+        # Clear or create output file
+        with open(output_text_file, "w"):
+            pass
+
         if no_encode:
-            # Single pass
-            with open(output_text_file, "w") as _:
-                pass
-            write_direct_listings(input_directory, output_text_file, included_files)
-            write_direct_listings_instructions(output_text_file)
-            print(f"Included files have been listed directly in {output_text_file}.")
+            if tree_only:
+                write_direct_listings_tree_only(input_directory, output_text_file, included_files)
+                print(f"Tree-only listing for {input_directory} has been written to {output_text_file}.")
+            else:
+                write_direct_listings(input_directory, output_text_file, included_files)
+                # instructions
+                write_direct_listings_instructions(output_text_file)
+                print(f"Included files have been listed directly in {output_text_file}.")
         else:
-            with open(output_text_file, "w") as _:
-                pass
-            write_encoded_listing(input_directory, output_text_file, included_files)
-            write_encoded_instructions(output_text_file)
-            print(f"Filtered files have been bundled + base64-encoded in {output_text_file}.")
-            print("Copy/paste it into the chat environment and follow instructions at the bottom of that file.")
-    # --- END UPDATED ARG PARSING FOR MULTIPLE DIRECTORIES ---
+            if tree_only:
+                write_encoded_listing_tree_only(input_directory, output_text_file, included_files)
+                print(f"Tree-only listing (no file contents) for {input_directory} has been written to {output_text_file}.")
+            else:
+                write_encoded_listing(input_directory, output_text_file, included_files)
+                write_encoded_instructions(output_text_file)
+                print(f"Filtered files have been bundled + base64-encoded in {output_text_file}.")
+                print("Copy/paste it into the chat environment and follow instructions at the bottom of that file.")
+    # --- END UPDATED ARG PARSING FOR MULTIPLE DIRECTORIES + TREE-ONLY ---
