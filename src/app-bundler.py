@@ -1,4 +1,4 @@
-# src/node_bundler.py
+# src/app-bundler.py
 import os
 import sys
 import base64
@@ -9,7 +9,7 @@ from textwrap import dedent
 def should_include_file(file_path, input_dir, user_extensions=None, language='node'):
     """
     Decide if file_path should be included based on:
-      1. Exclusions: node_modules, .next, package-lock.json
+      1. Exclusions: node_modules, .next, package-lock.json, .env
       2. If language='node' (default):
            - Include ONLY 'package.json' at the root (if present).
            - Include any file within 'src/' (recursively) that matches the extension list 
@@ -18,6 +18,9 @@ def should_include_file(file_path, input_dir, user_extensions=None, language='no
            - Ignore 'package.json' root file.
            - Include any file (from any path) that matches the extension list (if provided),
              e.g. .json files. If none provided, likely includes nothing.
+      4. If language='mkdocs':
+           - Include files with extensions: sh, yml, yaml, json, txt
+           - Exclude .env files
     """
     rel_path = os.path.relpath(file_path, start=input_dir)
     path_parts = rel_path.split(os.sep)
@@ -28,6 +31,8 @@ def should_include_file(file_path, input_dir, user_extensions=None, language='no
     if '.next' in path_parts:
         return False
     if rel_path == 'package-lock.json':
+        return False
+    if rel_path.endswith('.env'):
         return False
 
     # -- 2. If language='node'
@@ -64,6 +69,22 @@ def should_include_file(file_path, input_dir, user_extensions=None, language='no
         ext = ext.lower().lstrip('.')  # e.g. "json"
         return ext in user_extensions
 
+    # -- 4. If language='mkdocs'
+    elif language == 'mkdocs':
+        # Include files with extensions: sh, yml, yaml, json, txt
+        if not user_extensions:
+            user_extensions = ['sh', 'yml', 'yaml', 'json', 'txt']
+        user_extensions = [ext.lower() for ext in user_extensions]
+
+        # We do NOT include .env files
+        if rel_path.endswith('.env'):
+            return False
+
+        # Include files with the specified extensions
+        _, ext = os.path.splitext(rel_path)
+        ext = ext.lower().lstrip('.')  # e.g. "sh"
+        return ext in user_extensions
+
     # If some other language is passed, we can either mimic 'node' or do nothing special.
     # We'll mimic 'node' logic as a fallback.
     else:
@@ -83,20 +104,21 @@ def should_include_file(file_path, input_dir, user_extensions=None, language='no
 
         return False
 
-def get_included_files(input_dir, user_extensions=None, language='node'):
+def get_included_files(input_dirs, user_extensions=None, language='node'):
     included_files = []
-    for root, dirs, files in os.walk(input_dir):
-        for file in files:
-            filepath = os.path.join(root, file)
-            if should_include_file(filepath, input_dir, user_extensions, language):
-                rel_path = os.path.relpath(filepath, start=input_dir)
-                included_files.append(rel_path)
+    for input_dir in input_dirs:
+        for root, dirs, files in os.walk(input_dir):
+            for file in files:
+                filepath = os.path.join(root, file)
+                if should_include_file(filepath, input_dir, user_extensions, language):
+                    rel_path = os.path.relpath(filepath, start=input_dir)
+                    included_files.append((input_dir, rel_path))
     included_files.sort()
     return included_files
 
 def build_directory_tree_structure(files_list):
     tree = {}
-    for f in files_list:
+    for input_dir, f in files_list:
         parts = f.split(os.sep)
         current = tree
         for p in parts[:-1]:
@@ -119,37 +141,38 @@ def format_directory_tree(tree, prefix=""):
             lines.extend(format_directory_tree(subtree, new_prefix))
     return lines
 
-def write_directory_tree(out, included_files, root_dir):
+def write_directory_tree(out, included_files, root_dirs):
     """
-    Writes a tree structure to 'out', including the actual root directory name
+    Writes a tree structure to 'out', including the actual root directory names
     (instead of just '.').
     """
     tree_structure = build_directory_tree_structure(included_files)
     out.write("Project Directory Structure:\n\n")
     out.write("```\n")
-    # Use the base name of the provided directory instead of '.'
-    root_name = os.path.basename(os.path.normpath(root_dir))
-    # If the directory path ends with a slash or we couldn't extract a basename, fall back to '.'
-    if not root_name:
-        root_name = '.'
-    out.write(root_name + "\n")
-    lines = format_directory_tree(tree_structure)
-    for line in lines:
-        out.write(line + "\n")
+    for root_dir in root_dirs:
+        # Use the base name of the provided directory instead of '.'
+        root_name = os.path.basename(os.path.normpath(root_dir))
+        # If the directory path ends with a slash or we couldn't extract a basename, fall back to '.'
+        if not root_name:
+            root_name = '.'
+        out.write(root_name + "\n")
+        lines = format_directory_tree(tree_structure)
+        for line in lines:
+            out.write(line + "\n")
     out.write("```\n\n")
 
-def zip_filtered_directory(input_dir, zip_path, included_files):
+def zip_filtered_directory(input_dirs, zip_path, included_files):
     with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-        for f in included_files:
+        for input_dir, f in included_files:
             filepath = os.path.join(input_dir, f)
             zipf.write(filepath, f)
 
-def write_direct_listings(input_dir, output_file, included_files):
+def write_direct_listings(input_dirs, output_file, included_files):
     with open(output_file, "w") as out:
-        # Pass 'input_dir' to show the real root name
-        write_directory_tree(out, included_files, input_dir)
+        # Pass 'input_dirs' to show the real root names
+        write_directory_tree(out, included_files, input_dirs)
 
-        for fpath in included_files:
+        for input_dir, fpath in included_files:
             out.write(f"## File: {fpath}\n")
             full_path = os.path.join(input_dir, fpath)
             with open(full_path, "r", encoding='utf-8', errors='replace') as f:
@@ -169,18 +192,18 @@ def write_direct_listings(input_dir, output_file, included_files):
         ''')
         out.write(instructions)
 
-def write_encoded_listing(input_dir, output_file, included_files):
+def write_encoded_listing(input_dirs, output_file, included_files):
     with tempfile.TemporaryDirectory() as tmpdir:
         zip_path = os.path.join(tmpdir, "filtered_app.zip")
-        zip_filtered_directory(input_dir, zip_path, included_files)
+        zip_filtered_directory(input_dirs, zip_path, included_files)
 
         with open(zip_path, "rb") as f:
             zip_data = f.read()
             encoded = base64.b64encode(zip_data).decode('utf-8')
 
     with open(output_file, "w") as out:
-        # Pass 'input_dir' to show the real root name
-        write_directory_tree(out, included_files, input_dir)
+        # Pass 'input_dirs' to show the real root names
+        write_directory_tree(out, included_files, input_dirs)
         out.write(encoded)
 
         instructions = dedent('''
@@ -202,17 +225,17 @@ def write_encoded_listing(input_dir, output_file, included_files):
 if __name__ == "__main__":
     args = sys.argv[1:]
     if len(args) < 2:
-        print("Usage: python bundler.py <input_directory> <output_text_file> [--no-encode] [--extension-list EXT_LIST] [--language LANG]")
+        print("Usage: python bundler.py <input_directory1> <input_directory2> <output_text_file> [--no-encode] [--extension-list EXT_LIST] [--language LANG]")
         sys.exit(1)
 
-    input_directory = args[0]
-    output_text_file = args[1]
+    input_directories = [args[0], args[1]]
+    output_text_file = args[2]
 
     no_encode = False
     user_extensions = None
     language = 'node'  # default
 
-    i = 2
+    i = 3
     while i < len(args):
         if args[i] == "--no-encode":
             no_encode = True
@@ -230,16 +253,17 @@ if __name__ == "__main__":
             i += 1
         i += 1
 
-    if not os.path.isdir(input_directory):
-        print(f"Error: {input_directory} is not a directory.")
-        sys.exit(1)
+    for input_directory in input_directories:
+        if not os.path.isdir(input_directory):
+            print(f"Error: {input_directory} is not a directory.")
+            sys.exit(1)
 
-    included_files = get_included_files(input_directory, user_extensions, language)
+    included_files = get_included_files(input_directories, user_extensions, language)
 
     if no_encode:
-        write_direct_listings(input_directory, output_text_file, included_files)
+        write_direct_listings(input_directories, output_text_file, included_files)
         print(f"Included files have been listed directly in {output_text_file}.")
     else:
-        write_encoded_listing(input_directory, output_text_file, included_files)
+        write_encoded_listing(input_directories, output_text_file, included_files)
         print(f"Filtered files have been bundled + base64-encoded in {output_text_file}.")
         print("Copy/paste it into the chat environment and follow instructions at the bottom of that file.")

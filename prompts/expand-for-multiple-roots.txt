@@ -1,0 +1,401 @@
+The python script that I include below is named src/app-bundler.py is used for generating a document that summarizes a project involving various source code files as well as other artifacts and it has command line options to allow it to modify the extensions it searches for as well as to choose between encoded and text dump output.
+Please help me modify it so that I may point it to an mkdocs project consisting of files summarized as the following:
+
+~/projects/es2/
+├── docs/
+│   ├── docs/
+│   │   ├── device-activation.md -> ../../api/device-activation-deactivation-rules.txt
+│   │   ├── device-rules.md -> ../../api/DeviceLifetimeRules.md
+│   │   ├── openapi.yaml -> ../../api/OAS30_es2.yaml
+│   │   └── guides/
+│   ├── mkdocs.yml
+│   └── setup-venv.sh
+├── infrastructure/
+│   ├── infrastructure.yml
+│   ├── deploy-docs-infrastructure.sh
+│   └── lambda/auth-edge/
+│       ├── index.js
+│       └── package.json
+└── .env (contains USER_POOL_ID) (contains sensitive data whose values need to be protected)
+
+
+What follows is a listing of two directories that are roots to directory trees for the docs site that I would like to summarize.  I would like to have app-bundler.sh show the trees for these projects and then to bundle up just the files in the root directory having extensions of:  sh, yml, yaml, json and txt.  I do not wish to use encoding.  
+
+I know that we need to provide a method for listing two root directories instead of just one. So let's modify app-bundler.py to accommodate this.
+
+
+Here are the two roots:
+
+
+cd /Users/chris/projects/es2/infrastructure
+chris@Mac ~/projects/es2/infrastructure % ls -ltr
+total 360
+-rwxr-xr-x  1 chris  staff  1165 Jan 14 15:53 deploy-docs-infrastructure.sh
+-rw-r--r--  1 chris  staff   373 Jan 21 14:52 validation-record.json
+-rw-r--r--  1 chris  staff   778 Jan 21 15:05 deploy-docs-infrastructure-output.txt
+-rw-r--r--  1 chris  staff   765 Jan 21 15:23 README.md
+-rw-r--r--  1 chris  staff   254 Jan 21 15:43 trust-policy.json
+-rwxr-xr-x  1 chris  staff    51 Jan 22 09:30 remove-s3-bucket.sh
+-rwxr-xr-x  1 chris  staff   483 Jan 22 09:30 delete-and-redeploy-docs-infrastructure.sh
+-rwxr-xr-x  1 chris  staff    81 Jan 22 09:45 check-if-domain-exists.sh
+-rwxr-xr-x  1 chris  staff   117 Jan 22 09:46 create-domain-if-needed.sh
+-rwxr-xr-x  1 chris  staff   304 Jan 22 09:54 cognito-app-client-update.sh
+-rwxr-xr-x  1 chris  staff   348 Jan 22 09:56 SetAllowedOAuthFlowsUserPoolClient.sh
+-rwxr-xr-x  1 chris  staff   364 Jan 22 09:57 Restoreoauth2CallbackURLLambdaFunctionExpects.sh
+-rwxr-xr-x  1 chris  staff    69 Jan 22 15:39 wait-for-stack-update.sh
+-rwxr-xr-x  1 chris  staff   190 Jan 22 16:01 get-log-group-name.sh
+-rwxr-xr-x  1 chris  staff   727 Jan 22 16:02 create-cloudwatch-policy.sh
+-rw-r--r--  1 chris  staff   308 Jan 22 16:03 cloudwatch-policy.json
+-rwxr-xr-x  1 chris  staff   644 Jan 24 13:51 check-current-state.sh
+-rwxr-xr-x  1 chris  staff   240 Jan 24 13:52 publish-version.sh
+-rwxr-xr-x  1 chris  staff   677 Jan 24 13:54 update-stack.sh
+-rwxr-xr-x  1 chris  staff   381 Jan 24 14:31 describe-stack-events.sh
+-rwxr-xr-x  1 chris  staff   363 Jan 24 14:33 remove-lambda-env-vars.sh
+-rwxr-xr-x  1 chris  staff   364 Jan 25 10:31 check-lambda-status.sh
+-rwxr-xr-x  1 chris  staff   424 Jan 25 10:34 check-lambda-configuration.sh
+-rw-r--r--  1 chris  staff  2614 Jan 25 10:37 lambda-backup.json
+-rwxr-xr-x  1 chris  staff   452 Jan 25 10:42 delete-lambda-function.sh
+-rwxr-xr-x  1 chris  staff   172 Jan 25 10:57 describe-stacks.sh
+-rwxr-xr-x  1 chris  staff   411 Jan 25 11:37 deploy-lambda-for-auth-edge.sh
+-rwxr-xr-x  1 chris  staff   232 Jan 25 13:53 get-distrubution-arns.sh
+-rwxr-xr-x  1 chris  staff   353 Jan 25 19:20 describe-user-pool-client.sh
+-rwxr-xr-x  1 chris  staff   334 Jan 25 19:35 list-users-from-pool.sh
+-rwxr-xr-x  1 chris  staff   107 Jan 25 20:19 prep-lambda-dir.sh
+-rwxr-xr-x  1 chris  staff    88 Jan 25 20:19 zip-lambda-package.sh
+-rwxr-xr-x  1 chris  staff   319 Jan 25 21:43 update-function.sh
+-rwxr-xr-x  1 chris  staff   277 Jan 26 13:27 show-last-stack-event.sh
+-rwxr-xr-x  1 chris  staff   265 Jan 26 13:39 describe-log-groups.sh
+-rwxr-xr-x  1 chris  staff   226 Jan 26 13:52 stream-logs.sh
+-rwxr-xr-x  1 chris  staff   304 Jan 26 14:05 get-cloudfront-distribution-config.sh
+-rw-r--r--  1 chris  staff  5108 Jan 26 14:06 distribution.json
+-rw-r--r--  1 chris  staff     1 Jan 26 17:01 describe-log-groups.txt
+-rw-r--r--  1 chris  staff  5108 Jan 26 17:21 dist.json
+-rw-r--r--  1 chris  staff  4698 Jan 26 17:50 all-groups.json
+drwxr-xr-x  5 chris  staff   160 Jan 26 20:00 lambda
+-rw-r--r--  1 chris  staff  3343 Jan 26 20:01 infrastructure.yml
+chris@Mac ~/projects/es2/infrastructure % 
+
+
+
+chris@Mac ~/projects/es2/docs % ls -tlr
+total 32
+-rwxr-xr-x   1 chris  staff   193 Jan 14 15:45 setup-venv.sh
+-rwxr-xr-x   1 chris  staff    34 Jan 14 15:46 source-venv.sh
+drwxr-xr-x   7 chris  staff   224 Jan 21 15:06 env
+drwxr-xr-x   8 chris  staff   256 Jan 21 15:17 docs
+-rw-r--r--   1 chris  staff  1224 Jan 21 15:17 mkdocs.yml
+drwxr-xr-x  13 chris  staff   416 Jan 21 15:20 site
+-rw-r--r--   1 chris  staff  3500 Jan 25 10:45 overview.txt
+chris@Mac ~/projects/es2/docs % 
+
+
+Here is src/app-bundler.py
+# src/node_bundler.py
+import os
+import sys
+import base64
+import zipfile
+import tempfile
+from textwrap import dedent
+
+def should_include_file(file_path, input_dir, user_extensions=None, language='node'):
+    """
+    Decide if file_path should be included based on:
+      1. Exclusions: node_modules, .next, package-lock.json
+      2. If language='node' (default):
+           - Include ONLY 'package.json' at the root (if present).
+           - Include any file within 'src/' (recursively) that matches the extension list 
+             (defaulting to ['js','mjs','jsx'] if none provided).
+      3. If language='none':
+           - Ignore 'package.json' root file.
+           - Include any file (from any path) that matches the extension list (if provided),
+             e.g. .json files. If none provided, likely includes nothing.
+    """
+    rel_path = os.path.relpath(file_path, start=input_dir)
+    path_parts = rel_path.split(os.sep)
+
+    # -- 1. Exclusion rules
+    if 'node_modules' in path_parts:
+        return False
+    if '.next' in path_parts:
+        return False
+    if rel_path == 'package-lock.json':
+        return False
+
+    # -- 2. If language='node'
+    if language == 'node':
+        # By default, if user hasn't provided an --extension-list, we use these
+        if not user_extensions:
+            user_extensions = ['js','mjs','jsx']
+        # Normalize them
+        user_extensions = [ext.lower() for ext in user_extensions]
+
+        # If exactly 'package.json' at the root
+        if rel_path == 'package.json':
+            return True
+        
+        # Otherwise, only files under 'src/' that match the extension list
+        if rel_path.startswith('src' + os.sep):
+            _, ext = os.path.splitext(rel_path)
+            ext = ext.lower().lstrip('.')  # e.g. "js"
+            return ext in user_extensions
+
+        # If we reach here, we skip
+        return False
+
+    # -- 3. If language='none'
+    elif language == 'none':
+        # If user hasn't provided any extension list, default to empty => no files
+        if not user_extensions:
+            user_extensions = []
+        user_extensions = [ext.lower() for ext in user_extensions]
+
+        # We do NOT include package.json from the root
+        # Instead, we include files from anywhere if extension matches
+        _, ext = os.path.splitext(rel_path)
+        ext = ext.lower().lstrip('.')  # e.g. "json"
+        return ext in user_extensions
+
+    # If some other language is passed, we can either mimic 'node' or do nothing special.
+    # We'll mimic 'node' logic as a fallback.
+    else:
+        if not user_extensions:
+            user_extensions = ['js','mjs','jsx']
+        user_extensions = [ext.lower() for ext in user_extensions]
+
+        # If exactly 'package.json' at the root
+        if rel_path == 'package.json':
+            return True
+        
+        # Otherwise, only files under 'src/' that match the extension list
+        if rel_path.startswith('src' + os.sep):
+            _, ext = os.path.splitext(rel_path)
+            ext = ext.lower().lstrip('.')  # e.g. "js"
+            return ext in user_extensions
+
+        return False
+
+def get_included_files(input_dir, user_extensions=None, language='node'):
+    included_files = []
+    for root, dirs, files in os.walk(input_dir):
+        for file in files:
+            filepath = os.path.join(root, file)
+            if should_include_file(filepath, input_dir, user_extensions, language):
+                rel_path = os.path.relpath(filepath, start=input_dir)
+                included_files.append(rel_path)
+    included_files.sort()
+    return included_files
+
+def build_directory_tree_structure(files_list):
+    tree = {}
+    for f in files_list:
+        parts = f.split(os.sep)
+        current = tree
+        for p in parts[:-1]:
+            current = current.setdefault(p, {})
+        # Final part is the file name
+        current[parts[-1]] = None
+    return tree
+
+def format_directory_tree(tree, prefix=""):
+    # Sort directories first, then files
+    entries = sorted(tree.items(), key=lambda x: (x[1] is None, x[0]))
+    lines = []
+    for i, (name, subtree) in enumerate(entries):
+        connector = "├── " if i < len(entries) - 1 else "└── "
+        if subtree is None:
+            lines.append(prefix + connector + name)
+        else:
+            lines.append(prefix + connector + name)
+            new_prefix = prefix + ("│   " if i < len(entries) - 1 else "    ")
+            lines.extend(format_directory_tree(subtree, new_prefix))
+    return lines
+
+def write_directory_tree(out, included_files, root_dir):
+    """
+    Writes a tree structure to 'out', including the actual root directory name
+    (instead of just '.').
+    """
+    tree_structure = build_directory_tree_structure(included_files)
+    out.write("Project Directory Structure:\n\n")
+    out.write("```\n")
+    # Use the base name of the provided directory instead of '.'
+    root_name = os.path.basename(os.path.normpath(root_dir))
+    # If the directory path ends with a slash or we couldn't extract a basename, fall back to '.'
+    if not root_name:
+        root_name = '.'
+    out.write(root_name + "\n")
+    lines = format_directory_tree(tree_structure)
+    for line in lines:
+        out.write(line + "\n")
+    out.write("```\n\n")
+
+def zip_filtered_directory(input_dir, zip_path, included_files):
+    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        for f in included_files:
+            filepath = os.path.join(input_dir, f)
+            zipf.write(filepath, f)
+
+def write_direct_listings(input_dir, output_file, included_files):
+    with open(output_file, "w") as out:
+        # Pass 'input_dir' to show the real root name
+        write_directory_tree(out, included_files, input_dir)
+
+        for fpath in included_files:
+            out.write(f"## File: {fpath}\n")
+            full_path = os.path.join(input_dir, fpath)
+            with open(full_path, "r", encoding='utf-8', errors='replace') as f:
+                out.write(f.read())
+                out.write("\n")
+
+        instructions = dedent('''
+        ---------------------------
+        Instructions for the Assistant
+        ---------------------------
+        The text above includes the full plaintext listings of each included source file.
+        Consider each "## File: filename" line as a boundary between files.
+
+        To use this in the chat environment:
+        1. Imagine these files are restored into a directory structure according to their paths.
+        2. Review and potentially improve the code. Ask any follow-up questions if needed.
+        ''')
+        out.write(instructions)
+
+def write_encoded_listing(input_dir, output_file, included_files):
+    with tempfile.TemporaryDirectory() as tmpdir:
+        zip_path = os.path.join(tmpdir, "filtered_app.zip")
+        zip_filtered_directory(input_dir, zip_path, included_files)
+
+        with open(zip_path, "rb") as f:
+            zip_data = f.read()
+            encoded = base64.b64encode(zip_data).decode('utf-8')
+
+    with open(output_file, "w") as out:
+        # Pass 'input_dir' to show the real root name
+        write_directory_tree(out, included_files, input_dir)
+        out.write(encoded)
+
+        instructions = dedent('''
+        ---------------------------
+        Instructions for the Assistant
+        ---------------------------
+        The text above is a base64-encoded ZIP containing the filtered project files.
+
+        To use it in this chat environment:
+        1. Consider the above text as the encoded form of the code.
+        2. "Decode" it mentally and imagine the files have been restored from the ZIP.
+        3. If --language=node, you'll see:
+           - 'package.json' if it exists in the project root
+           - All matching files (e.g. .js, .mjs, .jsx) under src/
+        4. If --language=none + --extension-list "json", you'll see .json files from anywhere, skipping package.json.
+        ''')
+        out.write(instructions)
+
+if __name__ == "__main__":
+    args = sys.argv[1:]
+    if len(args) < 2:
+        print("Usage: python bundler.py <input_directory> <output_text_file> [--no-encode] [--extension-list EXT_LIST] [--language LANG]")
+        sys.exit(1)
+
+    input_directory = args[0]
+    output_text_file = args[1]
+
+    no_encode = False
+    user_extensions = None
+    language = 'node'  # default
+
+    i = 2
+    while i < len(args):
+        if args[i] == "--no-encode":
+            no_encode = True
+        elif args[i] == "--extension-list":
+            if i + 1 >= len(args):
+                print("Error: --extension-list requires a comma-separated list argument (e.g. 'js,mjs,jsx' or 'json').")
+                sys.exit(1)
+            user_extensions = [ext.strip().lower() for ext in args[i+1].split(",")]
+            i += 1
+        elif args[i] == "--language":
+            if i + 1 >= len(args):
+                print("Error: --language requires an argument (e.g. 'node' or 'none').")
+                sys.exit(1)
+            language = args[i+1].strip().lower()
+            i += 1
+        i += 1
+
+    if not os.path.isdir(input_directory):
+        print(f"Error: {input_directory} is not a directory.")
+        sys.exit(1)
+
+    included_files = get_included_files(input_directory, user_extensions, language)
+
+    if no_encode:
+        write_direct_listings(input_directory, output_text_file, included_files)
+        print(f"Included files have been listed directly in {output_text_file}.")
+    else:
+        write_encoded_listing(input_directory, output_text_file, included_files)
+        print(f"Filtered files have been bundled + base64-encoded in {output_text_file}.")
+        print("Copy/paste it into the chat environment and follow instructions at the bottom of that file.")
+
+
+------------
+
+Thank you so very kindly for the kind attention.  I have an important request for this session.
+
+Please adhere to these principles and repeat your response.
+
+    1. Provide full and complete listings for any files that you advise me to change.
+    2. Keep all original content and comments unless explicitly requested to modify or delete them.
+    3. Include the full file path as a comment at the top of each listing.
+    4. Make minimal changes to ensure clarity and consistency.
+    5. PLEASE Never remove existing functionality that had not been either requested to be removed, or stands in stark contrast of the work being requested.  When it must be removed make it very clear in the response that it was, and why it was removed.
+
+Never speculate:
+
+Please inspect the provided files to determine the exact logic and location for implementing the change. Please review the files for logic to modify and if you  cannot find the relevant logic, request the missing file.
+
+Please provide full and complete listings for all the files that you are changing without placeholders. Please include all of the original logic and comments, unless the logic or comments need to be modified to reflect your new ehnhancements.
+
+I cannot stress enough that you please retain my comments, in addition to the former logic except when they conflict with your changes.
+You have frequently retained the Logic, but yet remove important comments and I ask you you take care to keep both the logic and comments
+in tact. It can be very difficult when these items get removed.
+
+Please explain your changes when they related to mistakes you have made.
+I like it when you are polite and admit your mistakes and then explain them.
+
+------------
+
+# Code Review Protocol
+
+When modifying code, please:
+
+1. Document:
+   - Full file path as comment header on EVERY listing
+   - Complete context and changes
+
+2. Preserve:
+   - ALL existing comments
+   - ALL original features (unless explicitly requested to be changed)
+   - File structure and formatting
+
+3. Provide:
+   - Complete file listings (no placeholders)
+   - Only verified implementations
+   - Request missing files if needed
+
+4. Minimize:
+   - Changes to existing code
+   - Assumptions about implementation
+   - Speculation about logic
+
+5. Avoid sending identical files to previous ones sent down.
+   - When some request I make is satisfied with a duplicate of the last version
+   you gave me for some module and the copy you may wish to send me is identical
+   to the last versions you gave me this is fine however unnecessary.  It is
+   fine in such cases to just let me know there was no code changes to introduce
+   to satisfy my last request.
+
+
+Important: Never remove comments, documentation and especially not features
+unless explicitly requested. Removing, changing or breaking existing features
+is a common mistake you have made and it is the worst thing that can be done.
+
