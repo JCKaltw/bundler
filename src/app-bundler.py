@@ -1,4 +1,5 @@
 # /Users/chris/projects/es2/src/app-bundler.py
+
 #
 # Below is the complete and updated listing of app-bundler.py, retaining
 # all original content and comments while making a minimal change to
@@ -7,12 +8,13 @@
 # CHANGE EXPLANATION:
 #   - In `should_include_file(...)`, when `language == 'node'`,
 #     if no `--extension-list` is provided, the default list of extensions
-#     now includes: ['js','mjs','jsx','ts','tsx'] (previously only ['js','mjs','jsx']).
+#     now includes: ['js','mjs','jsx','ts','tsx','css'] (previously only ['js','mjs','jsx','ts','tsx']).
 #   - Similarly, in the "else" fallback branch (in case `language` is set
 #     to something other than 'node' or 'none'), we updated the default
-#     list to ['js','mjs','jsx','ts','tsx'] as well, to remain consistent.
+#     list to ['js','mjs','jsx','ts','tsx','css'] as well, to remain consistent.
 #
 #   We have preserved all original comments, logic, and features.
+#
 
 import os
 import sys
@@ -28,7 +30,7 @@ def should_include_file(file_path, input_dir, user_extensions=None, language='no
       2. If language='node' (default):
            - Include ONLY 'package.json' at the root (if present).
            - Include any file within 'src/' or 'app/' (recursively) that matches
-             the extension list (defaulting to ['js','mjs','jsx','ts','tsx'] if none provided).
+             the extension list (defaulting to ['js','mjs','jsx','ts','tsx','css'] if none provided).
       3. If language='none':
            - Ignore 'package.json' root file.
            - Include any file (from any path) that matches the extension list (if provided),
@@ -49,7 +51,7 @@ def should_include_file(file_path, input_dir, user_extensions=None, language='no
     if language == 'node':
         # By default, if user hasn't provided an --extension-list, we use these
         if not user_extensions:
-            user_extensions = ['js','mjs','jsx','ts','tsx']
+            user_extensions = ['js','mjs','jsx','ts','tsx','css']
         # Normalize them
         user_extensions = [ext.lower() for ext in user_extensions]
 
@@ -82,7 +84,7 @@ def should_include_file(file_path, input_dir, user_extensions=None, language='no
     # If some other language is passed, we mimic 'node' logic as a fallback.
     else:
         if not user_extensions:
-            user_extensions = ['js','mjs','jsx','ts','tsx']
+            user_extensions = ['js','mjs','jsx','ts','tsx','css']
         user_extensions = [ext.lower() for ext in user_extensions]
 
         # If exactly 'package.json' at the root
@@ -244,7 +246,7 @@ def write_encoded_instructions(output_file):
     2. "Decode" it mentally and imagine the files have been restored from the ZIP.
     3. If --language=node, you'll see:
        - 'package.json' if it exists in the project root
-       - All matching files (e.g. .js, .mjs, .jsx, .ts, .tsx) under src/ or app/
+       - All matching files (e.g. .js, .mjs, .jsx, .ts, .tsx, .css) under src/ or app/
     4. If --language=none + --extension-list="json", you'll see .json files from the entire project (excluding package.json).
     ''')
     with open(output_file, "a") as out:
