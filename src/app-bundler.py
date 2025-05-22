@@ -1,20 +1,33 @@
 # /Users/chris/projects/es2/src/app-bundler.py
-
 #
 # Below is the complete and updated listing of app-bundler.py, retaining
 # all original content and comments while making a minimal change to
-# include *.ts and *.tsx files for Node-based projects.
+# include an optional `--file-subset` argument. This new argument accepts
+# a file name (including possible path) and then reads all lines of that
+# file into a whitelist subset of files. Only those files will be
+# included in the final bundle, further filtering (whitelisting) the
+# files that are otherwise included by extension or language settings.
 #
 # CHANGE EXPLANATION:
-#   - In `should_include_file(...)`, when `language == 'node'`,
-#     if no `--extension-list` is provided, the default list of extensions
-#     now includes: ['js','mjs','jsx','ts','tsx','css'] (previously only ['js','mjs','jsx','ts','tsx']).
-#   - Similarly, in the "else" fallback branch (in case `language` is set
-#     to something other than 'node' or 'none'), we updated the default
-#     list to ['js','mjs','jsx','ts','tsx','css'] as well, to remain consistent.
+#   1. Added a new command-line argument `--file-subset [FILE]`.
+#      - If provided, we read each line from the file (stripping
+#        trailing newline characters) into a list called `file_subset`.
+#      - This list is passed to `get_included_files(...)`.
+#   2. Modified `get_included_files(...)` to optionally accept a
+#      `file_subset` list. If provided, only files whose rel_path is in
+#      that list are included in the results. This effectively acts as
+#      a whitelist subset filter.
+#   3. Preserved all comments, original logic, and features. No code was
+#      removed, only appended or minimally adjusted to integrate the new
+#      `file_subset` capability.
 #
-#   We have preserved all original comments, logic, and features.
+# Also recall the previously introduced feature that, for `language='node'`,
+# if no `--extension-list` is specified, we now include 'css' files by
+# default alongside 'js','mjs','jsx','ts','tsx'. We preserve that here.
 #
+# Please note that the `if __name__ == "__main__":` block remains intact
+# (as it was included), preserving the main entry point. No placeholders
+# or removed functionality, only the requested enhancements.
 
 import os
 import sys
@@ -99,13 +112,22 @@ def should_include_file(file_path, input_dir, user_extensions=None, language='no
 
         return False
 
-def get_included_files(input_dir, user_extensions=None, language='node'):
+def get_included_files(input_dir, user_extensions=None, language='node', file_subset=None):
+    """
+    Walk through input_dir and return a sorted list of files that meet the
+    should_include_file(...) criteria. If file_subset (list) is provided,
+    only include those files whose relative path is in file_subset.
+    """
     included_files = []
     for root, dirs, files in os.walk(input_dir):
         for file in files:
             filepath = os.path.join(root, file)
             if should_include_file(filepath, input_dir, user_extensions, language):
                 rel_path = os.path.relpath(filepath, start=input_dir)
+                # If a whitelist subset was provided, skip if not in that subset
+                if file_subset is not None:
+                    if rel_path not in file_subset:
+                        continue
                 included_files.append(rel_path)
     included_files.sort()
     return included_files
@@ -261,10 +283,12 @@ def parse_options(arglist, start_index):
         - no_encode (bool)
         - user_extensions (list or None)
         - language (str)
+        - file_subset (list or None)  <-- new addition
     """
     ne = False
     ue = None
     lang = 'node'
+    file_subset = None  # new variable
     i = start_index
     while i < len(arglist):
         item = arglist[i]
@@ -294,13 +318,39 @@ def parse_options(arglist, start_index):
             val = item.split("=", 1)[1]
             lang = val.strip().lower()
             i += 1
+        elif item == "--file-subset":
+            # e.g. --file-subset path/to/file
+            if i + 1 >= len(arglist):
+                print("Error: --file-subset requires a path to a file.")
+                sys.exit(1)
+            subset_path = arglist[i+1].strip()
+            i += 2
+            # Attempt to read lines from subset_path:
+            if not os.path.isfile(subset_path):
+                print(f"Error: The file-subset path '{subset_path}' is not a valid file.")
+                sys.exit(1)
+            with open(subset_path, "r", encoding="utf-8") as sf:
+                lines = sf.readlines()
+            # Strip out newline characters
+            file_subset = [ln.rstrip("\n\r") for ln in lines if ln.strip()]
+        elif item.startswith("--file-subset="):
+            # e.g. --file-subset=path/to/file
+            subset_path = item.split("=", 1)[1].strip()
+            i += 1
+            if not os.path.isfile(subset_path):
+                print(f"Error: The file-subset path '{subset_path}' is not a valid file.")
+                sys.exit(1)
+            with open(subset_path, "r", encoding="utf-8") as sf:
+                lines = sf.readlines()
+            # Strip out newline characters
+            file_subset = [ln.rstrip("\n\r") for ln in lines if ln.strip()]
         elif item.startswith("--"):
             # If this is something else, break (it might be directory-specific like --tree-only)
             break
         else:
             # Not an option, so break
             break
-    return i, ne, ue, lang
+    return i, ne, ue, lang, file_subset
 
 def parse_directories_with_tree_only(arglist, start_index):
     """
@@ -324,13 +374,13 @@ def parse_directories_with_tree_only(arglist, start_index):
     return dirs_info
 
 if __name__ == "__main__":
-    # --- BEGIN UPDATED ARG PARSING FOR MULTIPLE DIRECTORIES + TREE-ONLY ---
+    # --- BEGIN UPDATED ARG PARSING FOR MULTIPLE DIRECTORIES + TREE-ONLY + FILE-SUBSET ---
     args = sys.argv[1:]
     if len(args) < 2:
         print("Usage (single directory):")
-        print("   python bundler.py <input_directory> <output_text_file> [--no-encode] [--extension-list EXT_LIST] [--language LANG] [--tree-only]")
+        print("   python bundler.py <input_directory> <output_text_file> [--no-encode] [--extension-list EXT_LIST] [--language LANG] [--tree-only] [--file-subset path_to_file]")
         print("Usage (multiple directories):")
-        print("   python bundler.py <output_text_file> [--no-encode] [--extension-list EXT_LIST] [--language LANG]")
+        print("   python bundler.py <output_text_file> [--no-encode] [--extension-list EXT_LIST] [--language LANG] [--file-subset path_to_file]")
         print("       <dir1> [--tree-only] <dir2> [--tree-only] ...")
         sys.exit(1)
 
@@ -347,11 +397,12 @@ if __name__ == "__main__":
     no_encode = False
     user_extensions = None
     language = 'node'
+    file_subset = None  # capture the new argument
 
     if might_be_multi_mode:
         # Multi-directory approach
         output_text_file = args[0]
-        idx, no_encode, user_extensions, language = parse_options(args, 1)
+        idx, no_encode, user_extensions, language, file_subset = parse_options(args, 1)
         dirs_info = parse_directories_with_tree_only(args, idx)
         if not dirs_info:
             print("Error: no input directories specified in multi-directory mode.")
@@ -368,7 +419,7 @@ if __name__ == "__main__":
                 if not os.path.isdir(d):
                     print(f"Error: {d} is not a directory.")
                     sys.exit(1)
-                included_files = get_included_files(d, user_extensions, language)
+                included_files = get_included_files(d, user_extensions, language, file_subset)
                 if tree_only:
                     write_direct_listings_tree_only(d, output_text_file, included_files)
                 else:
@@ -383,7 +434,7 @@ if __name__ == "__main__":
                 if not os.path.isdir(d):
                     print(f"Error: {d} is not a directory.")
                     sys.exit(1)
-                included_files = get_included_files(d, user_extensions, language)
+                included_files = get_included_files(d, user_extensions, language, file_subset)
                 if tree_only:
                     write_encoded_listing_tree_only(d, output_text_file, included_files)
                 else:
@@ -398,7 +449,7 @@ if __name__ == "__main__":
         # Single-directory usage
         input_directory = args[0]
         output_text_file = args[1]
-        opt_index, no_encode, user_extensions, language = parse_options(args, 2)
+        opt_index, no_encode, user_extensions, language, file_subset = parse_options(args, 2)
         tree_only = False
         if opt_index < len(args) and args[opt_index] == "--tree-only":
             tree_only = True
@@ -408,7 +459,7 @@ if __name__ == "__main__":
             print(f"Error: {input_directory} is not a directory.")
             sys.exit(1)
 
-        included_files = get_included_files(input_directory, user_extensions, language)
+        included_files = get_included_files(input_directory, user_extensions, language, file_subset)
 
         # Overwrite the output file from scratch:
         with open(output_text_file, "w"):
@@ -431,4 +482,4 @@ if __name__ == "__main__":
                 write_encoded_instructions(output_text_file)
                 print(f"Filtered files have been bundled + base64-encoded in {output_text_file}.")
                 print("Copy/paste it into the chat environment and follow instructions at the bottom of that file.")
-    # --- END UPDATED ARG PARSING FOR MULTIPLE DIRECTORIES + TREE-ONLY ---
+    # --- END UPDATED ARG PARSING FOR MULTIPLE DIRECTORIES + TREE-ONLY + FILE-SUBSET ---
