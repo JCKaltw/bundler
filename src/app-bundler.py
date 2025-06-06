@@ -1,25 +1,23 @@
 # /Users/chris/projects/es2/src/app-bundler.py
 #
-# Below is the complete listing of app-bundler.py with a minimal enhancement:
-# introducing a new command-line argument `--root-files` to specify a comma-
-# separated list of additional files to include from the project root (in
-# addition to the previously-allowed `package.json` at the root).
+# Below is the complete listing of app-bundler.py with enhancements:
+# 1. Previously added `--root-files` to specify additional root-level files
+# 2. Now adding `--include-patterns` to specify glob patterns for including
+#    files from alternate directories (e.g., public/*.html, docs/**/*.md)
 #
 # CHANGE EXPLANATION (compared to your last version):
-#   1. Added the `--root-files` argument handling to `parse_options(...)`.
-#   2. In `should_include_file(...)`, within `if language == 'node':`, after
-#      checking if `rel_path == 'package.json'`, we also check if `rel_path`
-#      appears in the `root_files` list (and that it is indeed a root file,
-#      i.e. `len(path_parts) == 1`).
-#   3. All original comments and logic remain intact. This allows additional
-#      root-level files (like `next.config.js`) to be included if specified in
-#      `--root-files`.
+#   1. Added the `--include-patterns` argument handling to `parse_options(...)`.
+#   2. In `should_include_file(...)`, added pattern matching logic using fnmatch
+#      to check if the relative path matches any of the include patterns.
+#   3. All original comments and logic remain intact. This allows recursive
+#      directory inclusion via glob patterns like `public/*.html` or `docs/**/*.md`.
+#   4. Added import for `fnmatch` module for pattern matching.
 #
 # IMPORTANT:
 #   - We have retained all original functionality (package.json, filters for
-#     src/app directories, etc.).
-#   - We have inserted the new feature so that it only applies to root files
-#     that you explicitly name via `--root-files`.
+#     src/app directories, --root-files, etc.).
+#   - We have inserted the new feature so that it applies to any file matching
+#     the specified glob patterns, regardless of directory structure.
 #   - No code or comments have been removed (except where needed to implement
 #     this new feature). We have not deleted any existing functionality.
 #   - The main block remains at the end.
@@ -35,9 +33,10 @@ import sys
 import base64
 import zipfile
 import tempfile
+import fnmatch
 from textwrap import dedent
 
-def should_include_file(file_path, input_dir, user_extensions=None, language='node', root_files=None):
+def should_include_file(file_path, input_dir, user_extensions=None, language='node', root_files=None, include_patterns=None):
     """
     Decide if file_path should be included based on:
       1. Exclusions: node_modules, .next, package-lock.json
@@ -51,9 +50,13 @@ def should_include_file(file_path, input_dir, user_extensions=None, language='no
            - Ignore 'package.json' root file.
            - Include any file (from any path) that matches the extension list (if provided),
              e.g. .json files. If none provided, likely includes nothing.
+      4. NEW: Include any file that matches patterns specified in include_patterns
+           (e.g., public/*.html, docs/**/*.md) - this works for any language mode.
     """
     if root_files is None:
         root_files = []
+    if include_patterns is None:
+        include_patterns = []
 
     rel_path = os.path.relpath(file_path, start=input_dir)
     path_parts = rel_path.split(os.sep)
@@ -65,6 +68,11 @@ def should_include_file(file_path, input_dir, user_extensions=None, language='no
         return False
     if rel_path == 'package-lock.json':
         return False
+
+    # -- NEW: Check include patterns first (applies to all language modes)
+    for pattern in include_patterns:
+        if fnmatch.fnmatch(rel_path, pattern):
+            return True
 
     # -- 2. If language='node'
     if language == 'node':
@@ -126,7 +134,7 @@ def should_include_file(file_path, input_dir, user_extensions=None, language='no
 
         return False
 
-def get_included_files(input_dir, user_extensions=None, language='node', file_subset=None, root_files=None):
+def get_included_files(input_dir, user_extensions=None, language='node', file_subset=None, root_files=None, include_patterns=None):
     """
     Walk through input_dir and return a sorted list of files that meet the
     should_include_file(...) criteria. If file_subset (list) is provided,
@@ -136,7 +144,7 @@ def get_included_files(input_dir, user_extensions=None, language='node', file_su
     for root, dirs, files in os.walk(input_dir):
         for file in files:
             filepath = os.path.join(root, file)
-            if should_include_file(filepath, input_dir, user_extensions, language, root_files):
+            if should_include_file(filepath, input_dir, user_extensions, language, root_files, include_patterns):
                 rel_path = os.path.relpath(filepath, start=input_dir)
                 # If a whitelist subset was provided, skip if not in that subset
                 if file_subset is not None:
@@ -284,7 +292,9 @@ def write_encoded_instructions(output_file):
        - 'package.json' if it exists in the project root
        - All matching files (e.g. .js, .mjs, .jsx, .ts, .tsx, .css) under src/ or app/
        - Additional root-level files specified by --root-files (new feature).
+       - Files matching patterns specified by --include-patterns (new feature).
     4. If --language=none + --extension-list="json", you'll see .json files from the entire project (excluding package.json).
+    5. Files matching --include-patterns will be included regardless of language mode.
     ''')
     with open(output_file, "a") as out:
         out.write(instructions)
@@ -299,13 +309,15 @@ def parse_options(arglist, start_index):
         - user_extensions (list or None)
         - language (str)
         - file_subset (list or None)
-        - root_files (list or None)  <-- new addition
+        - root_files (list or None)
+        - include_patterns (list or None)  <-- new addition
     """
     ne = False
     ue = None
     lang = 'node'
     file_subset = None  # new variable
     root_files = []     # new variable for additional root-level files
+    include_patterns = []  # new variable for glob patterns
     i = start_index
     while i < len(arglist):
         item = arglist[i]
@@ -373,13 +385,25 @@ def parse_options(arglist, start_index):
             val = item.split("=", 1)[1]
             root_files = [rf.strip() for rf in val.split(",")]
             i += 1
+        elif item == "--include-patterns":
+            # e.g. --include-patterns public/*.html,docs/**/*.md
+            if i + 1 >= len(arglist):
+                print("Error: --include-patterns requires a comma-separated list of glob patterns.")
+                sys.exit(1)
+            include_patterns = [pattern.strip() for pattern in arglist[i+1].split(",")]
+            i += 2
+        elif item.startswith("--include-patterns="):
+            # e.g. --include-patterns=public/*.html,docs/**/*.md
+            val = item.split("=", 1)[1]
+            include_patterns = [pattern.strip() for pattern in val.split(",")]
+            i += 1
         elif item.startswith("--"):
             # If this is something else, break (it might be directory-specific like --tree-only)
             break
         else:
             # Not an option, so break
             break
-    return i, ne, ue, lang, file_subset, root_files
+    return i, ne, ue, lang, file_subset, root_files, include_patterns
 
 def parse_directories_with_tree_only(arglist, start_index):
     """
@@ -406,9 +430,9 @@ if __name__ == "__main__":
     args = sys.argv[1:]
     if len(args) < 2:
         print("Usage (single directory):")
-        print("   python bundler.py <input_directory> <output_text_file> [--no-encode] [--extension-list EXT_LIST] [--language LANG] [--tree-only] [--file-subset path_to_file] [--root-files rootfile1,rootfile2]")
+        print("   python bundler.py <input_directory> <output_text_file> [--no-encode] [--extension-list EXT_LIST] [--language LANG] [--tree-only] [--file-subset path_to_file] [--root-files rootfile1,rootfile2] [--include-patterns pattern1,pattern2]")
         print("Usage (multiple directories):")
-        print("   python bundler.py <output_text_file> [--no-encode] [--extension-list EXT_LIST] [--language LANG] [--file-subset path_to_file] [--root-files rootfile1,rootfile2]")
+        print("   python bundler.py <output_text_file> [--no-encode] [--extension-list EXT_LIST] [--language LANG] [--file-subset path_to_file] [--root-files rootfile1,rootfile2] [--include-patterns pattern1,pattern2]")
         print("       <dir1> [--tree-only] <dir2> [--tree-only] ...")
         sys.exit(1)
 
@@ -427,11 +451,12 @@ if __name__ == "__main__":
     language = 'node'
     file_subset = None
     root_files = []
+    include_patterns = []
 
     if might_be_multi_mode:
         # Multi-directory approach
         output_text_file = args[0]
-        idx, no_encode, user_extensions, language, file_subset, root_files = parse_options(args, 1)
+        idx, no_encode, user_extensions, language, file_subset, root_files, include_patterns = parse_options(args, 1)
         dirs_info = parse_directories_with_tree_only(args, idx)
         if not dirs_info:
             print("Error: no input directories specified in multi-directory mode.")
@@ -448,7 +473,7 @@ if __name__ == "__main__":
                 if not os.path.isdir(d):
                     print(f"Error: {d} is not a directory.")
                     sys.exit(1)
-                included_files = get_included_files(d, user_extensions, language, file_subset, root_files)
+                included_files = get_included_files(d, user_extensions, language, file_subset, root_files, include_patterns)
                 if tree_only:
                     write_direct_listings_tree_only(d, output_text_file, included_files)
                 else:
@@ -463,7 +488,7 @@ if __name__ == "__main__":
                 if not os.path.isdir(d):
                     print(f"Error: {d} is not a directory.")
                     sys.exit(1)
-                included_files = get_included_files(d, user_extensions, language, file_subset, root_files)
+                included_files = get_included_files(d, user_extensions, language, file_subset, root_files, include_patterns)
                 if tree_only:
                     write_encoded_listing_tree_only(d, output_text_file, included_files)
                 else:
@@ -478,7 +503,7 @@ if __name__ == "__main__":
         # Single-directory usage
         input_directory = args[0]
         output_text_file = args[1]
-        opt_index, no_encode, user_extensions, language, file_subset, root_files = parse_options(args, 2)
+        opt_index, no_encode, user_extensions, language, file_subset, root_files, include_patterns = parse_options(args, 2)
         tree_only = False
         if opt_index < len(args) and args[opt_index] == "--tree-only":
             tree_only = True
@@ -488,7 +513,7 @@ if __name__ == "__main__":
             print(f"Error: {input_directory} is not a directory.")
             sys.exit(1)
 
-        included_files = get_included_files(input_directory, user_extensions, language, file_subset, root_files)
+        included_files = get_included_files(input_directory, user_extensions, language, file_subset, root_files, include_patterns)
 
         # Overwrite the output file from scratch:
         with open(output_text_file, "w"):
@@ -511,4 +536,3 @@ if __name__ == "__main__":
                 write_encoded_instructions(output_text_file)
                 print(f"Filtered files have been bundled + base64-encoded in {output_text_file}.")
                 print("Copy/paste it into the chat environment and follow instructions at the bottom of that file.")
-
