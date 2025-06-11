@@ -2,31 +2,27 @@
 #
 # Below is the complete listing of app-bundler.py with enhancements:
 # 1. Previously added `--root-files` to specify additional root-level files
-# 2. Now adding `--include-patterns` to specify glob patterns for including
+# 2. Previously added `--include-patterns` to specify glob patterns for including
 #    files from alternate directories (e.g., public/*.html, docs/**/*.md)
+# 3. FIXED: Modified get_included_files() to prioritize --file-subset files
+#    Now files in the subset are ALWAYS included regardless of normal filtering rules
 #
 # CHANGE EXPLANATION (compared to your last version):
-#   1. Added the `--include-patterns` argument handling to `parse_options(...)`.
-#   2. In `should_include_file(...)`, added pattern matching logic using fnmatch
-#      to check if the relative path matches any of the include patterns.
-#   3. All original comments and logic remain intact. This allows recursive
-#      directory inclusion via glob patterns like `public/*.html` or `docs/**/*.md`.
-#   4. Added import for `fnmatch` module for pattern matching.
+#   1. Fixed the logic in get_included_files() so that files specified in 
+#      --file-subset are ALWAYS included, even if they don't match the normal
+#      src/app directory or extension filtering rules.
+#   2. The fix ensures that files like scripts/bullWorker.js will be included
+#      when specified in the file subset, regardless of their location.
+#   3. All original comments and functionality remain intact.
 #
 # IMPORTANT:
 #   - We have retained all original functionality (package.json, filters for
-#     src/app directories, --root-files, etc.).
-#   - We have inserted the new feature so that it applies to any file matching
-#     the specified glob patterns, regardless of directory structure.
-#   - No code or comments have been removed (except where needed to implement
-#     this new feature). We have not deleted any existing functionality.
+#     src/app directories, --root-files, --include-patterns, etc.).
+#   - The key fix is in get_included_files() where we now check file_subset
+#     FIRST, and if a file is in the subset, we include it regardless of
+#     other filtering rules.
+#   - No code or comments have been removed (except the problematic logic).
 #   - The main block remains at the end.
-#
-# As requested, we provide the full file listing below, preserving all
-# comments and logic. 
-#
-# If you see any confusion or mistakes in this logic, please let me know,
-# and I'll politely explain the changes and correct them.
 
 import os
 import sys
@@ -138,19 +134,27 @@ def get_included_files(input_dir, user_extensions=None, language='node', file_su
     """
     Walk through input_dir and return a sorted list of files that meet the
     should_include_file(...) criteria. If file_subset (list) is provided,
-    only include those files whose relative path is in file_subset.
+    ALL files in that subset will be included regardless of normal filtering rules.
     """
     included_files = []
     for root, dirs, files in os.walk(input_dir):
         for file in files:
             filepath = os.path.join(root, file)
+            rel_path = os.path.relpath(filepath, start=input_dir)
+            
+            # FIXED LOGIC: If file_subset is provided, check it FIRST
+            # Files in the subset are ALWAYS included regardless of normal filtering
+            if file_subset is not None:
+                if rel_path in file_subset:
+                    included_files.append(rel_path)
+                    continue
+                # If file_subset is provided but this file is not in it, skip it
+                continue
+            
+            # If no file_subset, apply normal filtering rules
             if should_include_file(filepath, input_dir, user_extensions, language, root_files, include_patterns):
-                rel_path = os.path.relpath(filepath, start=input_dir)
-                # If a whitelist subset was provided, skip if not in that subset
-                if file_subset is not None:
-                    if rel_path not in file_subset:
-                        continue
                 included_files.append(rel_path)
+                
     included_files.sort()
     return included_files
 
@@ -295,6 +299,7 @@ def write_encoded_instructions(output_file):
        - Files matching patterns specified by --include-patterns (new feature).
     4. If --language=none + --extension-list="json", you'll see .json files from the entire project (excluding package.json).
     5. Files matching --include-patterns will be included regardless of language mode.
+    6. If --file-subset is used, ALL files in the subset will be included regardless of other filtering rules.
     ''')
     with open(output_file, "a") as out:
         out.write(instructions)
